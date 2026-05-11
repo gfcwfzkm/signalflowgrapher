@@ -39,13 +39,24 @@ class LabelWidget(QLabel, ObjectObservable):
         # --- LabelWidget-specific ---
         self.__owner = owner
         self.__owner_widget = owner_widget
+        self.__zoom_factor = 1.0
+        self.__base_font_size = 13
 
         font_database = QFontDatabase()
         font_id = font_database.addApplicationFont(roman_font)
         if (font_id == -1):
             raise IOError("Font could not be loaded")
         font_name = QFontDatabase.applicationFontFamilies(font_id)[0]
-        font = QFont(font_name, 13)
+        self.__font_name = font_name
+        self.__apply_zoom_font()
+
+    def set_zoom_transform(self, zoom_factor):
+        self.__zoom_factor = max(0.01, float(zoom_factor))
+        self.__apply_zoom_font()
+
+    def __apply_zoom_font(self):
+        font = QFont(self.__font_name)
+        font.setPointSizeF(max(6.0, self.__base_font_size * self.__zoom_factor))
         self.setFont(font)
         self.adjustSize()
         self.__reposition()
@@ -84,8 +95,10 @@ class LabelWidget(QLabel, ObjectObservable):
         Reposition on parent widget based on own size and owner position.
         """
         center = self.__owner_widget.get_center()
-        p = QPoint(int(center.x() + self.__owner.label_dx - self.width() / 2),
-                   int(center.y() + self.__owner.label_dy - self.height() / 2))
+        p = QPoint(int(center.x() + (self.__owner.label_dx * self.__zoom_factor)
+                       - self.width() / 2),
+                   int(center.y() + (self.__owner.label_dy * self.__zoom_factor)
+                       - self.height() / 2))
         self.move(p)
 
     # Model events

@@ -21,6 +21,10 @@ class FixedGridWidget(QWidget):
         self.__offset = QPoint(int(offset.x() % self.__grid_size),
                                int(offset.y() % self.__grid_size))
 
+    def set_grid_size(self, size):
+        self.__grid_size = max(1, int(size))
+        self.set_offset(self.__offset)
+
     def paintEvent(self, event: QPaintEvent):
         # Init painter
         pen = QPen()

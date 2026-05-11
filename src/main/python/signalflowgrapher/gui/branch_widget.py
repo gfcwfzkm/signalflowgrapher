@@ -21,28 +21,61 @@ class BranchWidget(GraphItem):
                  ** kwargs):
         super().__init__(*args, **kwargs)
         self.__owner = owner
-        self.__start = QPoint(int(owner.start.x), int(owner.start.y))
-        self.__end = QPoint(int(owner.end.x), int(owner.end.y))
-        self.__spline1 = spline1
-        self.__spline2 = spline2
+        self.__start_model = QPoint(int(owner.start.x), int(owner.start.y))
+        self.__end_model = QPoint(int(owner.end.x), int(owner.end.y))
+        self.__spline1_model = QPoint(int(spline1.x()), int(spline1.y()))
+        self.__spline2_model = QPoint(int(spline2.x()), int(spline2.y()))
+        self.__start = QPoint(self.__start_model)
+        self.__end = QPoint(self.__end_model)
+        self.__spline1 = QPoint(self.__spline1_model)
+        self.__spline2 = QPoint(self.__spline2_model)
         self.__branch = QPainterPath()
-        self.__pen_width = 3
+        self.__base_pen_width = 3
         # The arrow has the form of a triangle
         # Half of the width of the arrow (at the back)
-        self.__arrow_height = 9
+        self.__base_arrow_height = 9
         # Length of the arrow from top to back
-        self.__arrow_length = 27
+        self.__base_arrow_length = 27
         # The triangle is drawn with 3 bezier curves
         # These numbers determine the bend of the curves
-        self.__arrow_side_spline_depth = 2
-        self.__arrow_back_spline_depth = 5.5
+        self.__base_arrow_side_spline_depth = 2
+        self.__base_arrow_back_spline_depth = 5.5
         # Antialiasing offsets for arrow mask
-        self.__arrow_mask_length_offset = 8
-        self.__arrow_mask_height_offset = 5
+        self.__base_arrow_mask_length_offset = 8
+        self.__base_arrow_mask_height_offset = 5
         self.__arrow_mask = None
         self.__arrow = None
+        self.__zoom_factor = 1.0
+        self.__zoom_origin = QPointF(0, 0)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.updateGeometry()
+
+    def set_zoom_transform(self, zoom_factor, zoom_origin):
+        self.__zoom_factor = max(0.01, float(zoom_factor))
+        self.__zoom_origin = QPointF(zoom_origin)
+        self.__sync_points_from_model()
+        self.updateGeometry()
+
+    def __transform_point(self, point):
+        return QPoint(
+            int(round(self.__zoom_origin.x()
+                      + ((point.x() - self.__zoom_origin.x())
+                         * self.__zoom_factor))),
+            int(round(self.__zoom_origin.y()
+                      + ((point.y() - self.__zoom_origin.y())
+                         * self.__zoom_factor))))
+
+    def __sync_points_from_model(self):
+        self.__start = self.__transform_point(self.__start_model)
+        self.__end = self.__transform_point(self.__end_model)
+        self.__spline1 = self.__transform_point(self.__spline1_model)
+        self.__spline2 = self.__transform_point(self.__spline2_model)
+
+    def __scale(self, value):
+        return max(1, int(round(value * self.__zoom_factor)))
+
+    def __scale_float(self, value):
+        return max(0.1, float(value) * self.__zoom_factor)
 
     def updateGeometry(self):
         # Calculate path absolute
@@ -53,26 +86,36 @@ class BranchWidget(GraphItem):
         branch_middle = self.__get_bezier_middle(branch_abs)
         middle_angle = self.__get_bezier_middle_angle(branch_abs)
 
+        pen_width = self.__scale(self.__base_pen_width)
+        arrow_height = self.__scale(self.__base_arrow_height)
+        arrow_length = self.__scale(self.__base_arrow_length)
+        arrow_side_spline_depth = self.__scale_float(
+            self.__base_arrow_side_spline_depth)
+        arrow_back_spline_depth = self.__scale_float(
+            self.__base_arrow_back_spline_depth)
+        arrow_mask_length_offset = self.__scale(self.__base_arrow_mask_length_offset)
+        arrow_mask_height_offset = self.__scale(self.__base_arrow_mask_height_offset)
+
         # Calculate arrow absolute
         arrow_abs = self.__calculate_arrow(
             branch_middle,
             middle_angle,
-            self.__arrow_height,
-            self.__arrow_length,
-            self.__arrow_side_spline_depth,
-            self.__arrow_back_spline_depth)
+            arrow_height,
+            arrow_length,
+            arrow_side_spline_depth,
+            arrow_back_spline_depth)
 
         # Calculate arrow mask absolute
         arrow_mask_abs = self.__calculate_arrow(
             branch_middle,
             middle_angle,
-            self.__arrow_height + self.__arrow_mask_height_offset,
-            self.__arrow_length + self.__arrow_mask_length_offset,
-            self.__arrow_side_spline_depth,
-            self.__arrow_back_spline_depth)
+            arrow_height + arrow_mask_height_offset,
+            arrow_length + arrow_mask_length_offset,
+            arrow_side_spline_depth,
+            arrow_back_spline_depth)
 
         # Add some margin to avoid cutting off anti aliasing pixels of branch
-        branch_aliasing_margin = 4
+        branch_aliasing_margin = self.__scale(4)
         geo_branch = branch_abs.boundingRect() \
                                .toRect().marginsAdded(QMargins(
                                    branch_aliasing_margin,
@@ -104,9 +147,9 @@ class BranchWidget(GraphItem):
         self.__arrow_mask = arrow_mask_rel
 
         stroker = QPainterPathStroker()
-        stroker.setWidth(8)
+        stroker.setWidth(self.__scale(8))
         wide_stroke = stroker.createStroke(self.__branch)
-        stroker.setWidth(self.__pen_width)
+        stroker.setWidth(pen_width)
         narrow_stroke = stroker.createStroke(self.__branch)
         branch_outlet = wide_stroke.united(narrow_stroke).toFillPolygon()
         mask_poly_f = self.__arrow_mask.toFillPolygon().united(branch_outlet)
@@ -122,23 +165,12 @@ class BranchWidget(GraphItem):
         Updates the geometry of the widget if necessary.
         """
         if self.__owner is event.branch:
-            update_geo = False
-            spline1_new = QPoint(int(event.branch.spline1_x),
-                                 int(event.branch.spline1_y))
-
-            spline2_new = QPoint(int(event.branch.spline2_x),
-                                 int(event.branch.spline2_y))
-
-            if not self.__spline1 == spline1_new:
-                self.__spline1 = spline1_new
-                update_geo = True
-
-            if not self.__spline2 == spline2_new:
-                self.__spline2 = spline2_new
-                update_geo = True
-
-            if update_geo:
-                self.updateGeometry()
+            self.__spline1_model = QPoint(int(event.branch.spline1_x),
+                                          int(event.branch.spline1_y))
+            self.__spline2_model = QPoint(int(event.branch.spline2_x),
+                                          int(event.branch.spline2_y))
+            self.__sync_points_from_model()
+            self.updateGeometry()
 
     def node_moved_event(self, event: PositionedNodeMovedEvent):
         """
@@ -146,12 +178,14 @@ class BranchWidget(GraphItem):
         Updates the geometry of the widget if necessary.
         """
         if self.__owner.start is event.node:
-            self.__start = QPoint(int(event.node.x),
-                                  int(event.node.y))
+            self.__start_model = QPoint(int(event.node.x),
+                                        int(event.node.y))
+            self.__sync_points_from_model()
             self.updateGeometry()
         if self.__owner.end is event.node:
-            self.__end = QPoint(int(event.node.x),
-                                int(event.node.y))
+            self.__end_model = QPoint(int(event.node.x),
+                                      int(event.node.y))
+            self.__sync_points_from_model()
             self.updateGeometry()
 
     def graph_moved_event(self, event: GraphMovedEvent):
@@ -159,14 +193,15 @@ class BranchWidget(GraphItem):
         Triggered after the whole graph has been moved.
         Does not change the geometry but mvoes the widget.
         """
-        self.__start = QPoint(int(self.__owner.start.x),
-                              int(self.__owner.start.y))
-        self.__end = QPoint(int(self.__owner.end.x),
-                            int(self.__owner.end.y))
-        self.__spline1 = QPoint(int(self.__owner.spline1_x),
-                                int(self.__owner.spline1_y))
-        self.__spline2 = QPoint(int(self.__owner.spline2_x),
-                                int(self.__owner.spline2_y))
+        self.__start_model = QPoint(int(self.__owner.start.x),
+                        int(self.__owner.start.y))
+        self.__end_model = QPoint(int(self.__owner.end.x),
+                      int(self.__owner.end.y))
+        self.__spline1_model = QPoint(int(self.__owner.spline1_x),
+                          int(self.__owner.spline1_y))
+        self.__spline2_model = QPoint(int(self.__owner.spline2_x),
+                          int(self.__owner.spline2_y))
+        self.__sync_points_from_model()
         super().graph_moved_event(event)
 
     def get_handles(self):
@@ -189,7 +224,7 @@ class BranchWidget(GraphItem):
 
     def paintEvent(self, QPaintEvent):
         pen = QPen()
-        pen.setWidth(self.__pen_width)
+        pen.setWidth(self.__scale(self.__base_pen_width))
         if self.selected:
             pen.setColor(self.palette().highlight().color())
         else:
@@ -388,16 +423,46 @@ class SplineHandleWidget(GraphItem):
         self.__branch = branch
         self.__node = node
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self._origin_abs = origin
-        self._spline_abs = spline
+        self._origin_model = QPoint(int(origin.x()), int(origin.y()))
+        self._spline_model = QPoint(int(spline.x()), int(spline.y()))
+        self._origin_abs = QPoint(self._origin_model)
+        self._spline_abs = QPoint(self._spline_model)
         self._origin_ = None
         self._spline_ = None
-        self.__radius = 5
-        self.__circle_width = 2
+        self.__base_radius = 5
+        self.__base_circle_width = 2
+        self.__radius = self.__base_radius
+        self.__circle_width = self.__base_circle_width
         self.__handle_pos = None
+        self.__zoom_factor = 1.0
+        self.__zoom_origin = QPointF(0, 0)
         self.updateGeometry()
 
+    def set_zoom_transform(self, zoom_factor, zoom_origin):
+        self.__zoom_factor = max(0.01, float(zoom_factor))
+        self.__zoom_origin = QPointF(zoom_origin)
+        self._sync_points_from_model()
+        self.updateGeometry()
+
+    def _transform_point(self, point):
+        return QPoint(
+            int(round(self.__zoom_origin.x()
+                      + ((point.x() - self.__zoom_origin.x())
+                         * self.__zoom_factor))),
+            int(round(self.__zoom_origin.y()
+                      + ((point.y() - self.__zoom_origin.y())
+                         * self.__zoom_factor))))
+
+    def _sync_points_from_model(self):
+        self._origin_abs = self._transform_point(self._origin_model)
+        self._spline_abs = self._transform_point(self._spline_model)
+
+    def __scale(self, value):
+        return max(1, int(round(value * self.__zoom_factor)))
+
     def updateGeometry(self):
+        self.__radius = self.__scale(self.__base_radius)
+        self.__circle_width = self.__scale(self.__base_circle_width)
         # Get absolute position of handle by spline
         __handle_pos_abs = rotate_point(
             self._origin_abs,
@@ -431,7 +496,7 @@ class SplineHandleWidget(GraphItem):
 
         # Create stroke to give space for anti aliasing pixels of line
         stroker = QPainterPathStroker()
-        stroker.setWidth(4)
+        stroker.setWidth(self.__scale(4))
         line_stroke = stroker.createStroke(self.line_path)
 
         mask = circle_region.united(
@@ -456,16 +521,15 @@ class SplineHandleWidget(GraphItem):
 
     def node_moved_event(self, event: PositionedNodeMovedEvent):
         if self.get_node() is event.node:
-            new_origin = QPoint(event.node.x,
-                                event.node.y)
-            if not self._origin == new_origin:
-                self._origin_abs = new_origin
-                self.updateGeometry()
+            self._origin_model = QPoint(int(event.node.x),
+                                        int(event.node.y))
+            self._sync_points_from_model()
+            self.updateGeometry()
 
     def graph_moved_event(self, event: GraphMovedEvent):
-        self._origin_abs = QPoint(
-            int(self.__node.x),
-            int(self.__node.y))
+        self._origin_model = QPoint(int(self.__node.x),
+                                    int(self.__node.y))
+        self._sync_points_from_model()
         super().graph_moved_event(event)
 
     def paintEvent(self, QPaintEvent):
@@ -525,19 +589,19 @@ class Spline1HandleWidget(SplineHandleWidget):
         Makes sure the spline positions is udpated accordingly.
         """
         if self.get_branch() is event.branch:
-            new_spline1 = QPoint(int(event.branch.spline1_x),
-                                 int(event.branch.spline1_y))
-            if not self._spline_abs == new_spline1:
-                self._spline_abs = new_spline1
-                self.updateGeometry()
+            self._spline_model = QPoint(int(event.branch.spline1_x),
+                                        int(event.branch.spline1_y))
+            self._sync_points_from_model()
+            self.updateGeometry()
 
     def graph_moved_event(self, event: GraphMovedEvent):
         """
         Triggered after whole graph has moved.
         Makes sure the absolute spline position is updated accordingly.
         """
-        self._spline_abs = QPoint(int(self.get_branch().spline1_x),
-                                  int(self.get_branch().spline1_y))
+        self._spline_model = QPoint(int(self.get_branch().spline1_x),
+                        int(self.get_branch().spline1_y))
+        self._sync_points_from_model()
         super().graph_moved_event(event)
 
 
@@ -555,17 +619,17 @@ class Spline2HandleWidget(SplineHandleWidget):
         Makes sure the spline positions is udpated accordingly.
         """
         if self.get_branch() is event.branch:
-            new_spline2 = QPoint(int(event.branch.spline2_x),
-                                 int(event.branch.spline2_y))
-            if not self._spline_abs == new_spline2:
-                self._spline_abs = new_spline2
-                self.updateGeometry()
+            self._spline_model = QPoint(int(event.branch.spline2_x),
+                                        int(event.branch.spline2_y))
+            self._sync_points_from_model()
+            self.updateGeometry()
 
     def graph_moved_event(self, event: GraphMovedEvent):
         """
         Triggered after whole graph has moved.
         Makes sure the absolute spline position is updated accordingly.
         """
-        self._spline_abs = QPoint(int(self.get_branch().spline2_x),
-                                  int(self.get_branch().spline2_y))
+        self._spline_model = QPoint(int(self.get_branch().spline2_x),
+                        int(self.get_branch().spline2_y))
+        self._sync_points_from_model()
         super().graph_moved_event(event)

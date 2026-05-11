@@ -1,5 +1,5 @@
 from PySide6 import QtCore, QtGui
-from PySide6.QtCore import Qt, QPoint, QRect, QSize
+from PySide6.QtCore import Qt, QPoint, QPointF, QRect, QSize
 from PySide6.QtGui import QMouseEvent, QCursor, QResizeEvent
 from PySide6.QtWidgets import QWidget, QApplication, QMessageBox, QRubberBand
 from signalflowgrapher.gui.grid import FixedGrid, NoneGrid
@@ -47,7 +47,13 @@ class GraphField(QWidget):
         self.__label_model_map = {}
         self.__mouse_press_pos: QPoint = None
         self.__selection_rect = None
-        self.__grid_size = 30
+        self.__grid_size_base = 30
+        self.__zoom_factor = 1.0
+        self.__zoom_min = 0.25
+        self.__zoom_max = 4.0
+        self.__zoom_step = 1.25
+        self.__zoom_origin = QPointF(self.width() / 2, self.height() / 2)
+        self.__grid_size = self.__scaled_grid_size()
         self.__grid = FixedGrid(self.__grid_size)
         self.__grid_widget = FixedGridWidget(self.__grid_size, parent=self)
         self.__grid_widget.resize(self.size())
@@ -60,6 +66,85 @@ class GraphField(QWidget):
 
     def on_esc_press(self):
         self.__clear_selection()
+
+    def zoom_in(self):
+        self.__set_zoom_factor(self.__zoom_factor * self.__zoom_step)
+
+    def zoom_out(self):
+        self.__set_zoom_factor(self.__zoom_factor / self.__zoom_step)
+
+    def reset_zoom(self):
+        self.__set_zoom_factor(1.0)
+
+    def __scaled_grid_size(self):
+        return max(1, int(round(self.__grid_size_base * self.__zoom_factor)))
+
+    def __to_view_point(self, point: QPointF) -> QPointF:
+        return QPointF(
+            self.__zoom_origin.x()
+            + ((point.x() - self.__zoom_origin.x()) * self.__zoom_factor),
+            self.__zoom_origin.y()
+            + ((point.y() - self.__zoom_origin.y()) * self.__zoom_factor))
+
+    def __to_model_point(self, point: QPointF) -> QPointF:
+        return QPointF(
+            self.__zoom_origin.x()
+            + ((point.x() - self.__zoom_origin.x()) / self.__zoom_factor),
+            self.__zoom_origin.y()
+            + ((point.y() - self.__zoom_origin.y()) / self.__zoom_factor))
+
+    def __to_model_delta(self, dx: int, dy: int) -> QPoint:
+        return QPoint(int(round(dx / self.__zoom_factor)),
+                      int(round(dy / self.__zoom_factor)))
+
+    def __set_zoom_factor(self, factor):
+        new_factor = min(self.__zoom_max, max(self.__zoom_min, float(factor)))
+        if new_factor == self.__zoom_factor:
+            return
+
+        self.__zoom_factor = new_factor
+        self.__apply_zoom()
+
+    def __apply_zoom(self):
+        self.__zoom_origin = QPointF(self.width() / 2, self.height() / 2)
+
+        scaled_grid_size = self.__scaled_grid_size()
+        if scaled_grid_size != self.__grid_size:
+            self.__grid_size = scaled_grid_size
+            if isinstance(self.__grid, NoneGrid):
+                self.__grid = NoneGrid()
+            else:
+                self.__grid = FixedGrid(self.__grid_size)
+            self.__grid_widget.set_grid_size(self.__grid_size)
+
+        self.__grid.set_offset(self.__grid_offset)
+        self.__grid_widget.set_offset(self.__grid_offset)
+
+        for model, widget in self.__model_widget_map.items():
+            if isinstance(widget, NodeWidget):
+                widget.set_zoom_transform(self.__zoom_factor)
+                center = self.__to_view_point(QPointF(model.x, model.y))
+                widget.move(QPoint(
+                    int(round(center.x() - widget.width() / 2)),
+                    int(round(center.y() - widget.height() / 2))))
+            elif isinstance(widget, BranchWidget):
+                widget.set_zoom_transform(self.__zoom_factor,
+                                          self.__zoom_origin)
+
+        for label in self.__model_label_map.values():
+            label.set_zoom_transform(self.__zoom_factor)
+
+        for handle in self.__handles:
+            handle.set_zoom_transform(self.__zoom_factor,
+                                      self.__zoom_origin)
+
+        self.__grid_widget.repaint()
+
+    def __scaled_graph_event(self, event):
+        return GraphMovedEvent(event.nodes,
+                               event.branches,
+                               int(round(event.dx * self.__zoom_factor)),
+                               int(round(event.dy * self.__zoom_factor)))
 
     def on_ctrl_press(self):
         self.__grid = NoneGrid()
@@ -95,9 +180,10 @@ class GraphField(QWidget):
 
         dx = viewport_center_x - graph_center_x
         dy = viewport_center_y - graph_center_y
+        model_dx = self.__to_model_delta(dx, dy)
 
         # Move graph and update grid offset
-        self.__model.move_graph_relative(dx, dy)
+        self.__model.move_graph_relative(model_dx.x(), model_dx.y())
         self.__grid_offset += QtCore.QPoint(dx, dy)
         self.__grid.set_offset(self.__grid_offset)
         self.__grid_widget.set_offset(self.__grid_offset)
@@ -134,7 +220,10 @@ class GraphField(QWidget):
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:
             grid_pos = self.__grid.get_grid_position(event.position().toPoint())
-            self.__controller.create_node(grid_pos.x(), grid_pos.y())
+            model_pos = self.__to_model_point(
+                QPointF(grid_pos.x(), grid_pos.y()))
+            self.__controller.create_node(int(round(model_pos.x())),
+                                          int(round(model_pos.y())))
 
     def mouseMoveEvent(self, event: QMouseEvent):
         if self.__mouse_press_pos is not None:
@@ -158,7 +247,9 @@ class GraphField(QWidget):
                 self.__grid.set_offset(self.__grid_offset)
                 self.__grid_widget.set_offset(self.__grid_offset)
                 self.__grid_widget.repaint()
-                self.__model.move_graph_relative(diff.x(), diff.y())
+                model_move = self.__to_model_delta(diff.x(), diff.y())
+                self.__model.move_graph_relative(model_move.x(),
+                                                 model_move.y())
                 self.__mouse_press_pos = global_position
 
     def __on_label_click(self, event):
@@ -181,9 +272,11 @@ class GraphField(QWidget):
             grid_move = self.__grid.relative_move(event.dx,
                                                   event.dy,
                                                   event.widget)
+            model_move = self.__to_model_delta(grid_move.x(),
+                                               grid_move.y())
             self.__controller.move_label_relative(label_model,
-                                                  grid_move.x(),
-                                                  grid_move.y())
+                                                  model_move.x(),
+                                                  model_move.y())
             widget = self.__model_widget_map[label_model]
             if event.widget not in self.__selection:
                 self.__clear_selection()
@@ -231,14 +324,16 @@ class GraphField(QWidget):
                 event.dx,
                 event.dy,
                 event.widget)
+            model_move = self.__to_model_delta(grid_move.x(),
+                                               grid_move.y())
 
             for widget in self.__selection:
                 if isinstance(widget, NodeWidget):
                     node = self.__widget_model_map[widget]
-                    if grid_move.x() != 0 or grid_move.y() != 0:
+                    if model_move.x() != 0 or model_move.y() != 0:
                         self.__controller.move_node(node,
-                                                    grid_move.x(),
-                                                    grid_move.y())
+                                                    model_move.x(),
+                                                    model_move.y())
 
     def __on_branch_click(self, event: WidgetPressEvent):
         if isinstance(event, WidgetPressEvent):
@@ -282,10 +377,12 @@ class GraphField(QWidget):
             grid_move = self.__grid.relative_move(event.dx,
                                                   event.dy,
                                                   event.widget)
+            model_move = self.__to_model_delta(grid_move.x(),
+                                               grid_move.y())
             if isinstance(widget, Spline1HandleWidget):
-                dx1, dy1 = grid_move.x(), grid_move.y()
+                dx1, dy1 = model_move.x(), model_move.y()
             elif isinstance(widget, Spline2HandleWidget):
-                dx2, dy2 = grid_move.x(), grid_move.y()
+                dx2, dy2 = model_move.x(), model_move.y()
             self.__controller.transform_branch(
                 widget.get_branch(), -dx1, -dy1, -dx2, -dy2)
 
@@ -380,20 +477,24 @@ class GraphField(QWidget):
             self.__remove_label_relative(event.branch)
             return
         if isinstance(event, PositionedNodeMovedEvent):
+            view_event = PositionedNodeMovedEvent(
+                event.node,
+                int(round(event.dx * self.__zoom_factor)),
+                int(round(event.dy * self.__zoom_factor)))
             # Propagate event to nodes, branches
             for widget in self.__model_widget_map.values():
                 if isinstance(widget, NodeWidget):
-                    widget.node_moved_event(event)
+                    widget.node_moved_event(view_event)
                 elif isinstance(widget, BranchWidget):
-                    widget.node_moved_event(event)
+                    widget.node_moved_event(view_event)
 
             # Propagate event to active handles
             for handle in self.__handles:
-                handle.node_moved_event(event)
+                handle.node_moved_event(view_event)
 
             # Propagate event to labels
             for label in self.__model_label_map.values():
-                label.node_moved_event(event)
+                label.node_moved_event(view_event)
             return
         if isinstance(event, CurvedBranchTransformedEvent):
             # Propagate event to handles
@@ -440,25 +541,26 @@ class GraphField(QWidget):
 
             grid_offset_ = self.__model.get_grid_position()
             self.__grid_offset = QPoint(grid_offset_[0], grid_offset_[1])
-            self.__grid.set_offset(self.__grid_offset)
-            self.__grid_widget.set_offset(self.__grid_offset)
-            self.__grid_widget.repaint()
+            self.__apply_zoom()
             return
         if isinstance(event, GraphMovedEvent):
+            view_event = self.__scaled_graph_event(event)
             for widget in self.__model_widget_map.values():
-                widget.graph_moved_event(event)
+                widget.graph_moved_event(view_event)
 
             for widget in self.__model_label_map.values():
-                widget.graph_moved_event(event)
+                widget.graph_moved_event(view_event)
 
             for widget in self.__handles:
-                widget.graph_moved_event(event)
+                widget.graph_moved_event(view_event)
 
     def __add_node(self, node):
         widget = NodeWidget(node, parent=self)
+        widget.set_zoom_transform(self.__zoom_factor)
         # Set initial position centered to given point
-        widget.move(QPoint(int(node.x - widget.width() / 2),
-                           int(node.y - widget.height() / 2)))
+        center = self.__to_view_point(QPointF(node.x, node.y))
+        widget.move(QPoint(int(round(center.x() - widget.width() / 2)),
+                           int(round(center.y() - widget.height() / 2))))
         widget.observe(self.__on_node_click)
         self.__model_widget_map[node] = widget
         self.__widget_model_map[widget] = node
@@ -474,6 +576,7 @@ class GraphField(QWidget):
                               QPoint(int(branch.spline2_x),
                                      int(branch.spline2_y)),
                               parent=self)
+        widget.set_zoom_transform(self.__zoom_factor, self.__zoom_origin)
 
         self.__model_widget_map[branch] = widget
         self.__widget_model_map[widget] = branch
@@ -507,6 +610,7 @@ class GraphField(QWidget):
         self.__label_model_map[label] = labeled_object
 
         label.observe(self.__on_label_click)
+        label.set_zoom_transform(self.__zoom_factor)
         label.show()
 
     def __remove_label_relative(self, labeled_object: LabeledObject):
@@ -518,6 +622,7 @@ class GraphField(QWidget):
     def resizeEvent(self, event: QResizeEvent):
         # Resize grid
         self.__grid_widget.resize(self.size())
+        self.__apply_zoom()
         super().resizeEvent(event)
 
     def copy_to_clipboard(self):
@@ -584,14 +689,17 @@ class GraphField(QWidget):
         # Snap to grid
         grid_x = int(self.__grid_size*round((mouse_x-2) / self.__grid_size))
         grid_y = int(self.__grid_size*round((mouse_y-2) / self.__grid_size))
+        model_grid = self.__to_model_point(QPointF(grid_x, grid_y))
+        model_grid_x = int(round(model_grid.x()))
+        model_grid_y = int(round(model_grid.y()))
 
         # Compute bounding box of copied nodes
         min_x = min(n["x"] for n in nodes_data)
         min_y = min(n["y"] for n in nodes_data)
 
         # Offset so min_x/min_y lands at nearest grid cell
-        dx = grid_x - min_x
-        dy = grid_y - min_y
+        dx = model_grid_x - min_x
+        dy = model_grid_y - min_y
 
         id_map = {}
         new_branches = []

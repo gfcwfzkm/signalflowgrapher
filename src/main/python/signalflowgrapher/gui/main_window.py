@@ -69,6 +69,9 @@ class MainWindow(QMainWindow):
         self._ui.action_new.triggered.connect(self.__new)
         self._ui.action_exit.triggered.connect(lambda: self.close())
         self._ui.action_center_graph.triggered.connect(self.__center_graph)
+        self._ui.action_zoom_in.triggered.connect(self.__zoom_in)
+        self._ui.action_zoom_out.triggered.connect(self.__zoom_out)
+        self._ui.action_reset_zoom.triggered.connect(self.__reset_zoom)
         self._ui.action_about.triggered.connect(self.__about)
         self._ui.action_copy.triggered.connect(self.__copy)
         self._ui.action_cut.triggered.connect(self.__cut)
@@ -260,6 +263,15 @@ class MainWindow(QMainWindow):
 
     def __center_graph(self):
         self.__graph_field.center_graph()
+
+    def __zoom_in(self):
+        self.__graph_field.zoom_in()
+
+    def __zoom_out(self):
+        self.__graph_field.zoom_out()
+
+    def __reset_zoom(self):
+        self.__graph_field.reset_zoom()
 
     def __about(self):
         # Create and set about text
