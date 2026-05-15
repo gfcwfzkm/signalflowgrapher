@@ -112,3 +112,47 @@ class TestMainWindowZoomActions(TestCase):
                                 base_handle_size.width())
         self.assertGreaterEqual(zoomed_handle_size.height(),
                                 base_handle_size.height())
+
+    def test_zoom_to_fit_fits_and_centers(self):
+        from signalflowgrapher.model.model import Model, ObservableGraph, PositionedNode, CurvedBranch
+        from signalflowgrapher.gui.graph_field import GraphField
+
+        # Prepare model and graph
+        model = Model()
+        graph = ObservableGraph()
+        model.graph = graph
+
+        # Create application-level objects
+        controller = MagicMock()
+        command_handler = MagicMock()
+
+        # Create graph field and set a viewport size
+        gf = GraphField(controller, model, command_handler)
+        gf.resize(800, 600)
+
+        # Add two nodes far apart and a curved branch
+        n1 = PositionedNode(graph, 50, 50, 0, 0)
+        n2 = PositionedNode(graph, 600, 400, 0, 0)
+
+        b = CurvedBranch(n1, n2, 120, 20, 480, 320, 0, 0)
+
+        # Ensure widgets are created
+        widgets = list(gf._GraphField__model_widget_map.values())
+        self.assertTrue(len(widgets) >= 3)
+
+        margin = 20
+        # Call zoom_to_fit
+        gf.zoom_to_fit(margin_px=margin)
+
+        # Compute bounding box of widgets in view coords
+        min_x = min(w.x() for w in widgets)
+        max_x = max(w.x() + w.width() for w in widgets)
+        min_y = min(w.y() for w in widgets)
+        max_y = max(w.y() + w.height() for w in widgets)
+
+        # Assert bounding box fits inside viewport with margin (allow 1px tolerance)
+        tol = 1
+        self.assertGreaterEqual(min_x, margin - tol)
+        self.assertLessEqual(max_x, gf.width() - margin + tol)
+        self.assertGreaterEqual(min_y, margin - tol)
+        self.assertLessEqual(max_y, gf.height() - margin + tol)

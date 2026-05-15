@@ -105,6 +105,120 @@ class GraphField(QWidget):
         self.__zoom_factor = new_factor
         self.__apply_zoom()
 
+    def zoom_to_fit(self, margin_px: int = 20):
+        """Zoom the view so that the whole graph fits into the viewport.
+
+        The algorithm:
+        - Compute the bounding box of all model points (nodes and branch control
+          points) in model coordinates.
+        - Compute the zoom factor so the bounding box (plus margin) fits the
+          viewport while clamping to min/max zoom.
+        - Apply the new zoom factor and then translate the graph so the
+          bounding-box center maps to the viewport center.
+        """
+        # Nothing to fit
+        if not self.__model_widget_map:
+            return
+
+        # Collect model-space points to consider for bounding box
+        xs = []
+        ys = []
+
+        for m in self.__model_widget_map.keys():
+            # Nodes
+            if hasattr(m, "x") and hasattr(m, "y"):
+                xs.append(m.x)
+                ys.append(m.y)
+
+            # Branches (curves) may expose spline control points
+            if hasattr(m, "spline1_x") and hasattr(m, "spline1_y"):
+                xs.append(m.spline1_x)
+                ys.append(m.spline1_y)
+            if hasattr(m, "spline2_x") and hasattr(m, "spline2_y"):
+                xs.append(m.spline2_x)
+                ys.append(m.spline2_y)
+
+        if not xs or not ys:
+            return
+
+        min_x = min(xs)
+        max_x = max(xs)
+        min_y = min(ys)
+        max_y = max(ys)
+
+        graph_width = max(1, max_x - min_x)
+        graph_height = max(1, max_y - min_y)
+
+        viewport_w = max(1, self.width())
+        viewport_h = max(1, self.height())
+
+        available_w = max(1, viewport_w - 2 * margin_px)
+        available_h = max(1, viewport_h - 2 * margin_px)
+
+        # Desired zoom such that graph fits into available viewport space
+        desired_zx = available_w / float(graph_width)
+        desired_zy = available_h / float(graph_height)
+        desired_z = min(desired_zx, desired_zy)
+
+        # Clamp and apply
+        desired_z = min(self.__zoom_max, max(self.__zoom_min, desired_z))
+
+        # Apply an initial zoom (this will repaint and set internal sizes)
+        self.__set_zoom_factor(desired_z)
+
+        # After applying zoom, ensure widget extents (node/branch sizes)
+        # also fit within the available viewport area. If not, scale down
+        # the zoom further.
+        widgets = list(self.__model_widget_map.values())
+        if widgets:
+            vw_min_x = min(w.x() for w in widgets)
+            vw_max_x = max(w.x() + w.width() for w in widgets)
+            vw_min_y = min(w.y() for w in widgets)
+            vw_max_y = max(w.y() + w.height() for w in widgets)
+
+            vw_width = max(1, vw_max_x - vw_min_x)
+            vw_height = max(1, vw_max_y - vw_min_y)
+
+            # If the widgets exceed available area, compute scale factor
+            scale_x = available_w / float(vw_width)
+            scale_y = available_h / float(vw_height)
+            scale = min(scale_x, scale_y, 1.0)
+
+            if scale < 1.0:
+                # Reduce zoom to accommodate widget sizes
+                new_z = self.__zoom_factor * scale
+                new_z = min(self.__zoom_max, max(self.__zoom_min, new_z))
+                self.__set_zoom_factor(new_z)
+
+                # Recompute widget bbox after scaling
+                widgets = list(self.__model_widget_map.values())
+                vw_min_x = min(w.x() for w in widgets)
+                vw_max_x = max(w.x() + w.width() for w in widgets)
+                vw_min_y = min(w.y() for w in widgets)
+                vw_max_y = max(w.y() + w.height() for w in widgets)
+
+        # Center bbox in view by moving model and grid offset
+        model_cx = min_x + graph_width / 2.0
+        model_cy = min_y + graph_height / 2.0
+
+        # Current bbox center in view coords
+        bbox_center_view = self.__to_view_point(QPointF(model_cx, model_cy))
+
+        viewport_center_x = self.width() // 2
+        viewport_center_y = self.height() // 2
+
+        dx = int(round(viewport_center_x - bbox_center_view.x()))
+        dy = int(round(viewport_center_y - bbox_center_view.y()))
+
+        model_move = self.__to_model_delta(dx, dy)
+
+        # Move model and update grid offset
+        self.__model.move_graph_relative(model_move.x(), model_move.y())
+        self.__grid_offset += QtCore.QPoint(dx, dy)
+        self.__grid.set_offset(self.__grid_offset)
+        self.__grid_widget.set_offset(self.__grid_offset)
+        self.__grid_widget.repaint()
+
     def __apply_zoom(self):
         self.__zoom_origin = QPointF(self.width() / 2, self.height() / 2)
 

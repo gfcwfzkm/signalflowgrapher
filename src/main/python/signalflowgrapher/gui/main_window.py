@@ -69,6 +69,7 @@ class MainWindow(QMainWindow):
         self._ui.action_new.triggered.connect(self.__new)
         self._ui.action_exit.triggered.connect(lambda: self.close())
         self._ui.action_center_graph.triggered.connect(self.__center_graph)
+        self._ui.action_zoom_to_fit.triggered.connect(self.__zoom_to_fit)
         self._ui.action_zoom_in.triggered.connect(self.__zoom_in)
         self._ui.action_zoom_out.triggered.connect(self.__zoom_out)
         self._ui.action_reset_zoom.triggered.connect(self.__reset_zoom)
@@ -272,6 +273,12 @@ class MainWindow(QMainWindow):
 
     def __reset_zoom(self):
         self.__graph_field.reset_zoom()
+
+    def __zoom_to_fit(self):
+        try:
+            self.__graph_field.zoom_to_fit()
+        except Exception:
+            logger.exception("Zoom to fit failed")
 
     def __about(self):
         # Create and set about text
