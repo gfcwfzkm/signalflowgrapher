@@ -160,4 +160,38 @@ For Qt6 you can use either PyQt6 or PySide6 as the binding. Pyside6 was chosen f
 - **Miscellaneous changes:** `.exec_()` becomes `.exec()`, and Qt enumerations are now scoped (e.g., `Qt.Key_Control` → `Qt.Key.Key_Control`).
 
 
+## Test locally
 
+From the directory `signalflowgrapher/src/`, do:
+
+`pip install -e signalflowgrapher`
+
+After the test:
+
+`pip uninstall signalflowgrapher`
+
+## Upload to TestPyPI
+
+`pip install build twine`
+
+`python -m build`
+
+`python -m twine check dist/*`
+
+`python -m twine upload --repository testpypi dist/*`
+
+`conda create --name test1 python`
+
+`conda activate test1`
+
+`python -m pip cache purge`
+
+`pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ signalflowgrapher`
+
+After the test:
+
+`pip uninstall signalflowgrapher`
+
+## Upload to TestPyPI
+
+`python -m twine upload dist/*`

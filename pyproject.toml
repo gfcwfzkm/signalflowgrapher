@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "signalflowgrapher"
+version = "2.1.3"
+description = "Signal-Flow-Graph Editor"
+readme = "README.md"
+license = "Artistic-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = [
+    "attrs",
+    "jsonschema",
+    "pyrsistent",
+    "PySide6",
+    "sympy",
+    "dependency-injector",
+]
+
+[project.scripts]
+signalflowgrapher = "signalflowgrapher.__main__:main"
+signalflowgrapher-register = "signalflowgrapher.tools.register:main"
+signalflowgrapher-deregister = "signalflowgrapher.tools.deregister:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"signalflowgrapher.resources" = [
+    "*.ttf", "*.otf",           # fonts
+    "*.tex",                    # LaTeX templates
+    "*.json",                   # schema
+    "*.conf",                   # logging config
+]
+"signalflowgrapher.resources.icons" = ["*.ico"]
+"signalflowgrapher.resources.icons.base"  = ["*.png"]
+"signalflowgrapher.resources.icons.linux" = ["*.png"]
+"signalflowgrapher.resources.icons.mac"   = ["*.png"]
+"signalflowgrapher.resources.translations" = ["*.qm"]
+"signalflowgrapher.resources.examples.SC_analysis__schmid18"  = ["*.sfg", "*.md"]
+"signalflowgrapher.resources.tool_chain_example" = ["*"]
+"signalflowgrapher.tools"         = ["*.png", "*.xcf"]
+"signalflowgrapher.tools.windows" = ["*.ps1", "*.md"]
+"signalflowgrapher.tools.linux" = ["*.sh", "*.md"]
+"signalflowgrapher.tools.macos" = ["*.sh", "*.md"]
+"signalflowgrapher.gui.ui" = ["*.ui"]
